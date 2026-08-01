@@ -97,7 +97,7 @@ def generate_article(keyword):
     body = "\n".join(lines[1:]).strip()
     return title, body
 
-# 3. noteへ投稿
+# 3. noteへ投稿 (ログイン後の遷移待ちを強化)
 def post_to_note(title, body):
     print("3/3 noteへの自動投稿を実行中...", flush=True)
     with sync_playwright() as p:
@@ -118,13 +118,16 @@ def post_to_note(title, body):
         login_button = "button:has-text('ログイン'), button[type='submit'], input[type='submit']"
         page.click(login_button)
         print(" -> ログインボタンをクリックしました", flush=True)
-        page.wait_for_timeout(5000)
+        
+        # ログイン後のURL切り替え・Cookie反映をしっかり待つ（7秒待機）
+        page.wait_for_timeout(7000)
         
         print(" -> 記事執筆画面へ移動中...", flush=True)
         page.goto("https://note.com/notes/new")
         
-        title_selector = "textarea[placeholder*='タイトル'], textarea[placeholder*='記事タイトル']"
-        page.wait_for_selector(title_selector, timeout=15000)
+        # タイトル入力エリアの待機時間を30秒に延長し、セレクタを拡張
+        title_selector = "textarea[placeholder*='タイトル'], textarea[placeholder*='記事タイトル'], textarea"
+        page.wait_for_selector(title_selector, timeout=30000)
         
         page.fill(title_selector, title)
         page.wait_for_timeout(1000)
@@ -135,13 +138,13 @@ def post_to_note(title, body):
         
         print(" -> 1/2 「公開設定」ボタンをクリックします...", flush=True)
         publish_config_button = "button:has-text('公開設定'), button:has-text('公開に進む')"
-        page.wait_for_selector(publish_config_button, timeout=10000)
+        page.wait_for_selector(publish_config_button, timeout=15000)
         page.click(publish_config_button)
         page.wait_for_timeout(4000)
         
         print(" -> 2/2 最終「投稿する」ボタンをクリックします...", flush=True)
         final_post_button = "button:has-text('投稿する'), button:has-text('記事を公開'), button:has-text('公開する')"
-        page.wait_for_selector(final_post_button, timeout=10000)
+        page.wait_for_selector(final_post_button, timeout=15000)
         page.click(final_post_button)
         
         page.wait_for_timeout(5000)
