@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 from datetime import datetime
 import time
 import requests
@@ -13,12 +14,10 @@ except Exception as e:
     print(f"ライブラリの読み込みでエラーが発生しました: {e}", flush=True)
     sys.exit(1)
 
-# --- 設定項目（GitHub ActionsのSecretsから取得） ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
-NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
+NOTE_SESSION_STATE = os.environ.get("NOTE_SESSION_STATE")
 
-if not all([GEMINI_API_KEY, NOTE_EMAIL, NOTE_PASSWORD]):
+if not all([GEMINI_API_KEY, NOTE_SESSION_STATE]):
     print("エラー: 環境変数が正しく設定されていません。", flush=True)
     sys.exit(1)
 
