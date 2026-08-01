@@ -2,7 +2,6 @@ name: Auto Note Publisher
 
 on:
   schedule:
-    # 毎日 朝7時(22:00 UTC) と 夜19時(10:00 UTC) に自動実行
     - cron: '0 22 * * *'
     - cron: '0 10 * * *'
   workflow_dispatch:
@@ -30,7 +29,6 @@ jobs:
     - name: Run Auto Post Script
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
-        NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
+        NOTE_SESSION_STATE: ${{ secrets.NOTE_SESSION_STATE }}
       run: |
         python auto_note_gemini.py
