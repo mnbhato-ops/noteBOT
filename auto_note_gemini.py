@@ -97,16 +97,18 @@ def generate_article(keyword):
     body = "\n".join(lines[1:]).strip()
     return title, body
 
-# 3. noteへ投稿 (ログイン後の遷移待ちを強化)
+# 3. noteへ投稿 (ログイン処理の失敗防止策を極限まで強化)
 def post_to_note(title, body):
     print("3/3 noteへの自動投稿を実行中...", flush=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
         
         print(" -> noteログイン画面へ移動中...", flush=True)
-        page.goto("https://note.com/login")
-        page.wait_for_timeout(3000)
+        page.goto("https://note.com/login", wait_until="networkidle")
         
         email_selector = "input[name='login'], input[type='email'], input[id='email']"
         page.wait_for_selector(email_selector, timeout=15000)
@@ -115,17 +117,24 @@ def post_to_note(title, body):
         password_selector = "input[name='password'], input[type='password']"
         page.fill(password_selector, NOTE_PASSWORD)
         
-        login_button = "button:has-text('ログイン'), button[type='submit'], input[type='submit']"
+        # フォーム送信（クリック＋Enter押しで確実に送信させる）
+        login_button = "button:has-text('ログイン'), button[type='submit']"
         page.click(login_button)
-        print(" -> ログインボタンをクリックしました", flush=True)
+        page.press(password_selector, "Enter")
+        print(" -> ログイン送信を実行しました", flush=True)
         
-        # ログイン後のURL切り替え・Cookie反映をしっかり待つ（7秒待機）
-        page.wait_for_timeout(7000)
+        # URLが/loginから変わるまで最大20秒待機
+        try:
+            page.wait_for_url(lambda url: "/login" not in url, timeout=20000)
+            print(" -> ログイン成功を検知しました", flush=True)
+        except Exception:
+            print(" -> 画面遷移待機タイムアウト（そのまま記事作成画面へ強行移動します）", flush=True)
+        
+        page.wait_for_timeout(3000)
         
         print(" -> 記事執筆画面へ移動中...", flush=True)
-        page.goto("https://note.com/notes/new")
+        page.goto("https://note.com/notes/new", wait_until="networkidle")
         
-        # タイトル入力エリアの待機時間を30秒に延長し、セレクタを拡張
         title_selector = "textarea[placeholder*='タイトル'], textarea[placeholder*='記事タイトル'], textarea"
         page.wait_for_selector(title_selector, timeout=30000)
         
