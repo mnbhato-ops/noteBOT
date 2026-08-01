@@ -5,7 +5,7 @@ on:
     # 毎日 朝7時(22:00 UTC) と 夜19時(10:00 UTC) に自動実行
     - cron: '0 22 * * *'
     - cron: '0 10 * * *'
-  workflow_dispatch: # 手動で「Run workflow」ボタンからも動かせる設定
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,10 +13,10 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
