@@ -97,42 +97,25 @@ def generate_article(keyword):
     body = "\n".join(lines[1:]).strip()
     return title, body
 
-# 3. noteへ投稿 (ログイン処理の失敗防止策を極限まで強化)
+# 3. noteへ投稿 (ログイン省略・セッション直接復元)
 def post_to_note(title, body):
     print("3/3 noteへの自動投稿を実行中...", flush=True)
+    
+    # Secretsから読み込んだセッション状態を一時ファイルとして復元
+    state_data = json.loads(NOTE_SESSION_STATE)
+    with open("temp_state.json", "w") as f:
+        json.dump(state_data, f)
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # 保存したログイン状態を読み込んでコンテキストを作成
         context = browser.new_context(
+            storage_state="temp_state.json",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         
-        print(" -> noteログイン画面へ移動中...", flush=True)
-        page.goto("https://note.com/login", wait_until="networkidle")
-        
-        email_selector = "input[name='login'], input[type='email'], input[id='email']"
-        page.wait_for_selector(email_selector, timeout=15000)
-        page.fill(email_selector, NOTE_EMAIL)
-        
-        password_selector = "input[name='password'], input[type='password']"
-        page.fill(password_selector, NOTE_PASSWORD)
-        
-        # フォーム送信（クリック＋Enter押しで確実に送信させる）
-        login_button = "button:has-text('ログイン'), button[type='submit']"
-        page.click(login_button)
-        page.press(password_selector, "Enter")
-        print(" -> ログイン送信を実行しました", flush=True)
-        
-        # URLが/loginから変わるまで最大20秒待機
-        try:
-            page.wait_for_url(lambda url: "/login" not in url, timeout=20000)
-            print(" -> ログイン成功を検知しました", flush=True)
-        except Exception:
-            print(" -> 画面遷移待機タイムアウト（そのまま記事作成画面へ強行移動します）", flush=True)
-        
-        page.wait_for_timeout(3000)
-        
-        print(" -> 記事執筆画面へ移動中...", flush=True)
+        print(" -> 直接記事執筆画面へ移動中...", flush=True)
         page.goto("https://note.com/notes/new", wait_until="networkidle")
         
         title_selector = "textarea[placeholder*='タイトル'], textarea[placeholder*='記事タイトル'], textarea"
@@ -158,6 +141,11 @@ def post_to_note(title, body):
         
         page.wait_for_timeout(5000)
         browser.close()
+        
+        # 一時ファイルの削除
+        if os.path.exists("temp_state.json"):
+            os.remove("temp_state.json")
+            
         print(" -> 投稿処理がすべて完了しました！", flush=True)
 
 if __name__ == "__main__":
