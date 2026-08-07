@@ -175,7 +175,7 @@ def generate_image(image_prompt, filename="cover_image.jpeg"):
             print(f" -> エラー詳細: {response.text}", flush=True)
         return None
 
-# --- 5. noteへ投稿 (カバー画像アップロード機能追加) ---
+# --- 5. noteへ投稿 (カバー画像アップロード機能追加・投稿処理強化版) ---
 def post_to_note(title, body, image_path):
     print("5/5 noteへの自動投稿を実行中...", flush=True)
     
@@ -216,78 +216,48 @@ def post_to_note(title, body, image_path):
                     page.wait_for_selector(cover_image_selector, timeout=15000)
                     
                     with page.expect_file_chooser() as fc_info:
-                        page.click(cover_image_selector)
+                        page.locator(cover_image_selector).first.click()
                     
                     file_chooser = fc_info.value
                     file_chooser.set_files(image_path)
                     
-                    print("   -> アップロード完了を待機中...", flush=True)
+                    print("   -> アップロード完了を待機中(10秒)...", flush=True)
                     page.wait_for_timeout(10000) 
                     print("   -> アップロード処理完了", flush=True)
 
                 except Exception as e:
                     print(f" -> カバー画像のアップロードに失敗しました (スキップします): {e}", flush=True)
             
-            # --- 公開処理 ---
+            # --- 公開処理 (強化版) ---
             print(" -> 1/2 「公開設定」ボタンをクリックします...", flush=True)
-            publish_config_button = "button:has-text('公開設定')"
-            page.wait_for_selector(publish_config_button, timeout=15000)
-            page.click(publish_config_button)
-            page.wait_for_timeout(5000) 
+            # ボタンのテキストが変更されても対応できるように複数の候補を指定
+            publish_config_button = "button:has-text('公開設定'), button:has-text('公開する')"
+            page.wait_for_selector(publish_config_button, state="visible", timeout=15000)
+            # 確実に見えている最初のボタンをクリック
+            page.locator(publish_config_button).first.click(force=True)
+            page.wait_for_timeout(6000) # モーダル画面が完全に開くのを待つ
             
             print(" -> 2/2 最終「投稿する」ボタンをクリックします...", flush=True)
-            final_post_button = "button:has-text('投稿する'), button:has-text('記事を公開')"
-            page.wait_for_selector(final_post_button, timeout=15000)
-            page.wait_for_timeout(2000)
-            page.click(final_post_button)
+            # モーダル内の最終公開ボタン（noteの仕様変更に合わせて候補を増やす）
+            final_post_button = "button:has-text('投稿する'), button:has-text('記事を公開'), button:has-text('今すぐ公開'), button:has-text('無料公開'), button:has-text('公開')"
             
-            print("   -> 投稿処理の完了を待機中...", flush=True)
+            # 要素が表示されるのを待機
+            page.wait_for_selector(final_post_button, state="visible", timeout=15000)
+            page.wait_for_timeout(2000) # アニメーションなどの完了を待つ
+            
+            # 見つかったボタンの「最後」のものをクリック（モーダル内のボタンを優先的に狙うため）
+            page.locator(final_post_button).last.click(force=True)
+            
+            print("   -> 投稿処理の完了を待機中(10秒)...", flush=True)
             page.wait_for_timeout(10000)
             print(" -> 投稿処理がすべて完了しました！", flush=True)
 
         except Exception as e:
             print(f" -> 投稿処理中にエラーが発生しました: {e}", flush=True)
+            # 失敗した際の原因を調べるためにスクリーンショットを保存
+            page.screenshot(path="debug_error.png")
+            print(" -> エラー時の画面を 'debug_error.png' として保存しました。画面の状態を確認してください。", flush=True)
         finally:
             browser.close()
             if os.path.exists(state_file):
                 os.remove(state_file)
-
-# --- メイン処理 ---
-if __name__ == "__main__":
-    print("--- プログラムを開始します ---", flush=True)
-    
-    if not all([GEMINI_API_KEY, NOTE_SESSION_STATE]):
-        print("エラー: 環境変数が正しく設定されていません。(GEMINI_API_KEY, NOTE_SESSION_STATE が必要)", flush=True)
-        sys.exit(1)
-
-    try:
-        from playwright.sync_api import sync_playwright
-        print("Playwrightライブラリの読み込み完了", flush=True)
-    except Exception as e:
-        print(f"Playwrightライブラリの読み込みでエラーが発生しました: {e}", flush=True)
-        print(" -> 'pip install playwright' と 'playwright install' を実行してください。", flush=True)
-        sys.exit(1)
-
-    # 1. noteからトレンドタグを取得
-    keyword = get_note_trending_tag()
-    
-    # 2. Geminiで記事を生成
-    title, body = generate_article(keyword)
-    print(f"\n生成タイトル: {title}\n", flush=True)
-
-    # 3. Geminiで画像プロンプトを作成
-    image_prompt = generate_image_prompt(title, body, keyword)
-    
-    # 4. Gemini (Imagen 3) で画像を生成
-    cover_image_filename = f"cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpeg"
-    image_path = generate_image(image_prompt, filename=cover_image_filename)
-
-    # 5. noteへ投稿
-    post_to_note(title, body, image_path)
-
-    # 6. 一時画像ファイルの削除
-    if image_path and os.path.exists(image_path):
-        os.remove(image_path)
-        print(f" -> 一時画像ファイルを削除しました: {image_path}", flush=True)
-
-    print("--- すべての処理が完了しました ---", flush=True)
