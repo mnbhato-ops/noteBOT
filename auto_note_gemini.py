@@ -6,23 +6,31 @@ import time
 import requests
 import base64
 
-# 環境変数の読み込み (Gemini APIキーとnoteのセッション情報のみで完結)
+print("--- プログラムを開始します ---", flush=True)
+
+try:
+    from playwright.sync_api import sync_playwright
+    print("ライブラリの読み込み完了", flush=True)
+except Exception as e:
+    print(f"ライブラリの読み込みでエラーが発生しました: {e}", flush=True)
+    sys.exit(1)
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 NOTE_SESSION_STATE = os.environ.get("NOTE_SESSION_STATE")
 
-# noteのトレンドタグを取得する際のエラー回避用
-sys.stdin.reconfigure(encoding='utf-8')
-sys.stdout.reconfigure(encoding='utf-8')
+if not all([GEMINI_API_KEY, NOTE_SESSION_STATE]):
+    print("エラー: 環境変数が正しく設定されていません。", flush=True)
+    sys.exit(1)
 
-# --- 1. noteからトレンドタグを取得 ---
+# 1. noteからトレンドタグを取得（元のコード）
 def get_note_trending_tag():
-    print("1/5 noteからトレンドを取得中...", flush=True)
+    print("1/4 noteからトレンドを取得中...", flush=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         try:
-            page.goto("https://note.com/topic", timeout=15000)
-            page.wait_for_timeout(4000)
+            page.goto("https://note.com/topic", timeout=10000)
+            page.wait_for_timeout(3000)
             
             tags = page.locator("a[href*='/hashtag/']").all_inner_texts()
             browser.close()
@@ -38,9 +46,9 @@ def get_note_trending_tag():
         print(" -> トレンド取得失敗のためデフォルトタグを使用します", flush=True)
         return "AI活用"
 
-# --- 2. Gemini APIで記事を生成 ---
+# 2. 直接HTTP通信でGemini APIを呼び出して記事作成（元のコード）
 def generate_article(keyword):
-    print("2/5 Gemini APIで記事を生成中...", flush=True)
+    print("2/4 Gemini APIで記事を生成中...", flush=True)
     
     current_hour = datetime.now().hour
     if current_hour < 12:
@@ -57,10 +65,8 @@ def generate_article(keyword):
     ・2行目以降：本文（1500文字程度）
     ・文体は親しみやすく丁寧な「〜です・〜ます」調
     ・末尾に関連するハッシュタグ（#{keyword} など）を3つ含める
-    ・HTMLタグは含めない
     """
     
-    # 最新の gemini-1.5-flash モデルを使用
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -80,6 +86,9 @@ def generate_article(keyword):
             print(f"APIエラー詳細: {response.text}", flush=True)
             raise Exception(f"Gemini APIリクエスト失敗 Status: {response.status_code}")
 
+    if response.status_code != 200:
+        raise Exception(f"Gemini APIリクエスト失敗 Status: {response.status_code}")
+
     res_json = response.json()
     content = res_json['candidates'][0]['content']['parts'][0]['text']
     
@@ -88,176 +97,118 @@ def generate_article(keyword):
     body = "\n".join(lines[1:]).strip()
     return title, body
 
-# --- 3. Gemini APIで画像生成プロンプトを作成 ---
-def generate_image_prompt(title, body, keyword):
-    print("3/5 Geminiで画像プロンプトを作成中...", flush=True)
+# 3. Gemini (Imagen 3) でカバー画像を生成する処理
+def generate_cover_image(title, keyword):
+    print("3/4 Gemini (Imagen 3) でカバー画像を生成中...", flush=True)
     
-    prompt_for_gemini = f"""
-    以下のnote記事のタイトルと本文から、この記事のカバー画像（アイキャッチ画像）として最適な、高品質な画像を生成するための詳細なプロンプトを作成してください。
-
-    【記事タイトル】
-    {title}
-
-    【記事本文（抜粋）】
-    {body[:500]}...
-
-    【出力ルール】
-    ・画像生成AI（Imagen 3）に入力できる、具体的で詳細な**英語のプロンプト**のみを出力してください。
-    ・画像のスタイルは、プロフェッショナルで、現代的、そして記事の内容（#{keyword}）に合ったものにしてください。
-    ・テキストや文字を画像内に含めないように指示してください("without any text or letters")。
-    ・出力はプロンプトの英語テキストのみにしてください。
-    """
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
+    # 画像用プロンプト作成
+    prompt_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt_req = {
         "contents": [{
-            "parts": [{"text": prompt_for_gemini}]
+            "parts": [{"text": f"記事タイトル「{title}」（テーマ: #{keyword}）に合うカバー画像の詳細な英語プロンプトを1文で出力してください。画像内に文字を含めない指示をつけてください。"}]
         }]
     }
-
-    response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
-        res_json = response.json()
-        image_prompt = res_json['candidates'][0]['content']['parts'][0]['text'].strip()
-        print(f"   -> 生成された画像プロンプト: {image_prompt[:50]}...", flush=True)
-        return image_prompt
-    else:
-        print(f" -> 画像プロンプト生成エラー: {response.text}", flush=True)
-        return f"A modern and professional illustration representing the concept of '{keyword}' for a blog post cover, without any text."
-
-# --- 4. Gemini API (Imagen 3) で画像を生成 ---
-def generate_image(image_prompt, filename="cover_image.jpeg"):
-    print("4/5 Gemini (Imagen 3) で画像を生成中...", flush=True)
     
-    # Imagen 3のREST APIエンドポイント
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    
-    # aspectRatioに16:9を指定し、noteのカバー画像に最適なサイズにする
-    payload = {
-        "instances": [
-            {
-                "prompt": image_prompt
-            }
-        ],
-        "parameters": {
-            "sampleCount": 1,
-            "aspectRatio": "16:9" 
-        }
-    }
-
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=120)
-        response.raise_for_status()
-        res_json = response.json()
-        
-        # 予測結果からbase64エンコードされた画像データを取得
-        if "predictions" in res_json and len(res_json["predictions"]) > 0:
-            prediction = res_json["predictions"][0]
-            b64_data = prediction.get("bytesBase64Encoded")
-            
-            if not b64_data:
-                raise Exception("画像データがレスポンスに含まれていません")
-                
-            image_data = base64.b64decode(b64_data)
-            with open(filename, "wb") as f:
-                f.write(image_data)
-                
-            print(f" -> 画像生成・保存成功: {filename}", flush=True)
-            return filename
-        else:
-            raise Exception("予期しないAPIレスポンス形式です")
-            
+        res = requests.post(prompt_url, json=prompt_req, timeout=30).json()
+        img_prompt = res['candidates'][0]['content']['parts'][0]['text'].strip()
+    except Exception:
+        img_prompt = f"A modern professional illustration representing {keyword}, no text"
+
+    # Imagen 3 で画像生成
+    imagen_url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={GEMINI_API_KEY}"
+    imagen_req = {
+        "instances": [{"prompt": img_prompt}],
+        "parameters": {"sampleCount": 1, "aspectRatio": "16:9"}
+    }
+    
+    try:
+        res = requests.post(imagen_url, json=imagen_req, timeout=90).json()
+        b64 = res["predictions"][0]["bytesBase64Encoded"]
+        image_path = "cover.jpeg"
+        with open(image_path, "wb") as f:
+            f.write(base64.b64decode(b64))
+        print(" -> カバー画像の生成完了", flush=True)
+        return image_path
     except Exception as e:
-        print(f" -> 画像生成失敗: {e}", flush=True)
-        if 'response' in locals() and response.text:
-            print(f" -> エラー詳細: {response.text}", flush=True)
+        print(f" -> 画像生成に失敗したため画像なしで続行します: {e}", flush=True)
         return None
 
-# --- 5. noteへ投稿 (カバー画像アップロード機能追加・投稿処理強化版) ---
-def post_to_note(title, body, image_path):
-    print("5/5 noteへの自動投稿を実行中...", flush=True)
+# 4. noteへ投稿（元の成功コードに画像設定のみを挿入）
+def post_to_note(title, body, image_path=None):
+    print("4/4 noteへの自動投稿を実行中...", flush=True)
     
-    if not image_path:
-        print(" -> 注意: カバー画像がないため、画像なしで投稿します。", flush=True)
-
+    # Secretsから読み込んだセッション状態を一時ファイルとして復元
     state_data = json.loads(NOTE_SESSION_STATE)
-    state_file = "temp_state.json"
-    with open(state_file, "w") as f:
+    with open("temp_state.json", "w") as f:
         json.dump(state_data, f)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # 保存したログイン状態を読み込んでコンテキストを作成
         context = browser.new_context(
-            storage_state=state_file,
+            storage_state="temp_state.json",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         
-        try:
-            print(" -> 直接記事執筆画面へ移動中...", flush=True)
-            page.goto("https://note.com/notes/new", wait_until="networkidle")
-            
-            title_selector = "textarea[placeholder*='タイトル']"
-            page.wait_for_selector(title_selector, timeout=30000)
-            page.fill(title_selector, title)
-            page.wait_for_timeout(1000)
-            
-            body_selector = "div[data-placeholder*='本文'], div[contenteditable='true']"
-            page.fill(body_selector, body)
-            page.wait_for_timeout(2000)
+        print(" -> 直接記事執筆画面へ移動中...", flush=True)
+        page.goto("https://note.com/notes/new", wait_until="networkidle")
+        
+        title_selector = "textarea[placeholder*='タイトル'], textarea[placeholder*='記事タイトル'], textarea"
+        page.wait_for_selector(title_selector, timeout=30000)
+        
+        page.fill(title_selector, title)
+        page.wait_for_timeout(1000)
+        
+        body_selector = "div[data-placeholder*='本文'], div[contenteditable='true']"
+        page.fill(body_selector, body)
+        page.wait_for_timeout(3000)
+        
+        # --- 追加: 画像が存在する場合のみカバー画像を設定 ---
+        if image_path and os.path.exists(image_path):
+            print(" -> カバー画像をアップロード中...", flush=True)
+            try:
+                cover_btn = "button:has-text('カバー画像を設定')"
+                page.wait_for_selector(cover_btn, timeout=10000)
+                with page.expect_file_chooser() as fc_info:
+                    page.click(cover_btn)
+                file_chooser = fc_info.value
+                file_chooser.set_files(image_path)
+                page.wait_for_timeout(5000)
+            except Exception as e:
+                print(f" -> 画像設定失敗（スキップして続行します）: {e}", flush=True)
 
-            # --- カバー画像のアップロード処理 ---
-            if image_path and os.path.exists(image_path):
-                print(" -> カバー画像をアップロード中...", flush=True)
-                try:
-                    cover_image_selector = "button:has-text('カバー画像を設定')"
-                    page.wait_for_selector(cover_image_selector, timeout=15000)
-                    
-                    with page.expect_file_chooser() as fc_info:
-                        page.locator(cover_image_selector).first.click()
-                    
-                    file_chooser = fc_info.value
-                    file_chooser.set_files(image_path)
-                    
-                    print("   -> アップロード完了を待機中(10秒)...", flush=True)
-                    page.wait_for_timeout(10000) 
-                    print("   -> アップロード処理完了", flush=True)
+        # --- 以下、元の成功コードと完全に同一の投稿フロー ---
+        print(" -> 1/2 「公開設定」ボタンをクリックします...", flush=True)
+        publish_config_button = "button:has-text('公開設定'), button:has-text('公開に進む')"
+        page.wait_for_selector(publish_config_button, timeout=15000)
+        page.click(publish_config_button)
+        page.wait_for_timeout(4000)
+        
+        print(" -> 2/2 最終「投稿する」ボタンをクリックします...", flush=True)
+        final_post_button = "button:has-text('投稿する'), button:has-text('記事を公開'), button:has-text('公開する')"
+        page.wait_for_selector(final_post_button, timeout=15000)
+        page.click(final_post_button)
+        
+        page.wait_for_timeout(5000)
+        browser.close()
+        
+        # 一時ファイルの削除
+        if os.path.exists("temp_state.json"):
+            os.remove("temp_state.json")
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+            
+        print(" -> 投稿処理がすべて完了しました！", flush=True)
 
-                except Exception as e:
-                    print(f" -> カバー画像のアップロードに失敗しました (スキップします): {e}", flush=True)
-            
-            # --- 公開処理 (強化版) ---
-            print(" -> 1/2 「公開設定」ボタンをクリックします...", flush=True)
-            # ボタンのテキストが変更されても対応できるように複数の候補を指定
-            publish_config_button = "button:has-text('公開設定'), button:has-text('公開する')"
-            page.wait_for_selector(publish_config_button, state="visible", timeout=15000)
-            # 確実に見えている最初のボタンをクリック
-            page.locator(publish_config_button).first.click(force=True)
-            page.wait_for_timeout(6000) # モーダル画面が完全に開くのを待つ
-            
-            print(" -> 2/2 最終「投稿する」ボタンをクリックします...", flush=True)
-            # モーダル内の最終公開ボタン（noteの仕様変更に合わせて候補を増やす）
-            final_post_button = "button:has-text('投稿する'), button:has-text('記事を公開'), button:has-text('今すぐ公開'), button:has-text('無料公開'), button:has-text('公開')"
-            
-            # 要素が表示されるのを待機
-            page.wait_for_selector(final_post_button, state="visible", timeout=15000)
-            page.wait_for_timeout(2000) # アニメーションなどの完了を待つ
-            
-            # 見つかったボタンの「最後」のものをクリック（モーダル内のボタンを優先的に狙うため）
-            page.locator(final_post_button).last.click(force=True)
-            
-            print("   -> 投稿処理の完了を待機中(10秒)...", flush=True)
-            page.wait_for_timeout(10000)
-            print(" -> 投稿処理がすべて完了しました！", flush=True)
-
-        except Exception as e:
-            print(f" -> 投稿処理中にエラーが発生しました: {e}", flush=True)
-            # 失敗した際の原因を調べるためにスクリーンショットを保存
-            page.screenshot(path="debug_error.png")
-            print(" -> エラー時の画面を 'debug_error.png' として保存しました。画面の状態を確認してください。", flush=True)
-        finally:
-            browser.close()
-            if os.path.exists(state_file):
-                os.remove(state_file)
+if __name__ == "__main__":
+    keyword = get_note_trending_tag()
+    title, body = generate_article(keyword)
+    print(f"\n生成タイトル: {title}\n", flush=True)
+    
+    # Geminiで画像を生成
+    image_path = generate_cover_image(title, keyword)
+    
+    # 元の投稿処理へ引き渡し
+    post_to_note(title, body, image_path)
